@@ -1521,10 +1521,38 @@ function iniciarReloj(){
 // ══ GRÁFICO MAREAS ══
 function renderTideChart(){
   var ctx=document.getElementById('tide-chart');if(!ctx)return;
-  var lb=[],dt=[];
-  for(var h=0;h<=24;h++){lb.push(h%6===0?String(h).padStart(2,'0')+'h':'');dt.push(+(0.9+0.85*Math.sin((h/12.4)*2*Math.PI)+0.12*Math.sin((h/6)*2*Math.PI)).toFixed(2));}
+  var lb=[],dt=[],ahora=new Date().getHours()+new Date().getMinutes()/60;
+  var ahoraIdx=Math.round(ahora);
+  for(var h=0;h<=24;h++){
+    lb.push(h%3===0?String(h).padStart(2,'0')+':00':'');
+    dt.push(+(0.9+0.85*Math.sin((h/12.4)*2*Math.PI)+0.12*Math.sin((h/6)*2*Math.PI)).toFixed(2));
+  }
   if(tideChartInst)tideChartInst.destroy();
-  tideChartInst=new Chart(ctx.getContext('2d'),{type:'line',data:{labels:lb,datasets:[{data:dt,fill:true,borderColor:'#38bdf8',borderWidth:2,backgroundColor:'rgba(56,189,248,.08)',tension:0.4,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'rgba(255,255,255,.3)',font:{size:9},maxTicksLimit:6},grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.07)'}},y:{ticks:{color:'rgba(255,255,255,.3)',font:{size:9},callback:function(v){return v+'m';}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.07)'},min:0,max:2}}}});
+  tideChartInst=new Chart(ctx.getContext('2d'),{
+    type:'line',
+    data:{
+      labels:lb,
+      datasets:[
+        {data:dt,fill:true,borderColor:'#38bdf8',borderWidth:2,backgroundColor:'rgba(56,189,248,.08)',tension:0.4,pointRadius:0,label:'Marea'},
+        {data:dt.map(function(_,i){return i===ahoraIdx?dt[ahoraIdx]:null;}),
+          borderColor:'#f5a623',borderWidth:2,pointRadius:5,pointBackgroundColor:'#f5a623',
+          showLine:false,label:'Ahora'}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{title:function(i){return i[0].label||'';},label:function(i){return i.raw!=null?i.raw.toFixed(2)+' m':'';}}}
+      },
+      scales:{
+        x:{ticks:{color:'rgba(255,255,255,.5)',font:{size:9},maxRotation:0,autoSkip:false,callback:function(v,i){return lb[i];}},
+          grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.07)'}},
+        y:{ticks:{color:'rgba(255,255,255,.5)',font:{size:9},callback:function(v){return v+'m';}},
+          grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.07)'},min:0,max:2}
+      }
+    }
+  });
 }
 function renderTideList(){
   var td=[{h:'02:14',desc:'Marea alta',val:1.74,hi:true},{h:'08:32',desc:'Marea baja',val:0.31,hi:false},{h:'16:45',desc:'⭐ Marea alta — Ventana de Oro',val:1.82,hi:true,gold:true},{h:'22:58',desc:'Marea baja',val:0.28,hi:false}];
