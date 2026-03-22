@@ -520,11 +520,10 @@ function activarGPS(){
 // ══ OPEN-METEO — con soporte de fecha futura ══
 async function cargarWx(lat,lng){
   try{
-    var today=new Date();
-    var isToday=curDate.toDateString()===today.toDateString();
-    var dateStr=curDate.toISOString().split('T')[0];
-    // Calcular índice de día (0=hoy, 1=mañana, etc.)
-    var diffDays=Math.round((curDate-today)/86400000);
+    var today=new Date();today.setHours(0,0,0,0);
+    var target=new Date(curDate);target.setHours(0,0,0,0);
+    var isToday=target.getTime()===today.getTime();
+    var diffDays=Math.round((target-today)/86400000);
     diffDays=Math.max(0,Math.min(6,diffDays));
 
     var rs=await Promise.all([
@@ -538,31 +537,49 @@ async function cargarWx(lat,lng){
         +'&timezone=America%2FSantiago&forecast_days=7')
     ]);
     var d=await Promise.all([rs[0].json(),rs[1].json()]);
+    var dm=d[0].daily||{},dw=d[1].daily||{};
+    var mc=d[0].current||{},wc=d[1].current||{};
 
-    var temp,olas,viento,dirViento,presion;
-
-    if(isToday){
-      // Usar datos actuales para hoy
-      var mc=d[0].current||{},wc=d[1].current||{};
-      temp=mc.sea_surface_temperature||15.5;
-      olas=mc.wave_height||0.8;
-      viento=wc.wind_speed_10m||12;
-      dirViento=wc.wind_direction_10m||225;
-      presion=wc.surface_pressure||1013;
-    }else{
-      // Usar datos diarios para días futuros
-      var dm=d[0].daily||{},dw=d[1].daily||{};
-      temp=(dm.sea_surface_temperature_max&&dm.sea_surface_temperature_max[diffDays])||15.5;
-      olas=(dm.wave_height_max&&dm.wave_height_max[diffDays])||0.8;
-      viento=(dw.wind_speed_10m_max&&dw.wind_speed_10m_max[diffDays])||12;
-      dirViento=(dw.wind_direction_10m_dominant&&dw.wind_direction_10m_dominant[diffDays])||225;
-      presion=(dw.surface_pressure_max&&dw.surface_pressure_max[diffDays])||1013;
+    // ── Guardar los 7 días en cache compartido con renderForecast ──
+    var temps=[],olas=[],vientos=[],dirVientos=[],presiones=[],fechas=[];
+    for(var i=0;i<7;i++){
+      // Día 0: usar current si es hoy, daily si es futuro
+      var t_i = (i===0&&isToday) ? (mc.sea_surface_temperature||dm.sea_surface_temperature_max&&dm.sea_surface_temperature_max[0]||15.5)
+                                  : ((dm.sea_surface_temperature_max&&dm.sea_surface_temperature_max[i])||15.5);
+      var o_i = (i===0&&isToday) ? (mc.wave_height||dm.wave_height_max&&dm.wave_height_max[0]||0.8)
+                                  : ((dm.wave_height_max&&dm.wave_height_max[i])||0.8);
+      var v_i = (i===0&&isToday) ? (wc.wind_speed_10m||dw.wind_speed_10m_max&&dw.wind_speed_10m_max[0]||12)
+                                  : ((dw.wind_speed_10m_max&&dw.wind_speed_10m_max[i])||12);
+      var dv_i= (i===0&&isToday) ? (wc.wind_direction_10m||dw.wind_direction_10m_dominant&&dw.wind_direction_10m_dominant[0]||225)
+                                  : ((dw.wind_direction_10m_dominant&&dw.wind_direction_10m_dominant[i])||225);
+      var p_i = (i===0&&isToday) ? (wc.surface_pressure||dw.surface_pressure_max&&dw.surface_pressure_max[0]||1013)
+                                  : ((dw.surface_pressure_max&&dw.surface_pressure_max[i])||1013);
+      temps.push(t_i);olas.push(o_i);vientos.push(v_i);dirVientos.push(dv_i);presiones.push(p_i);
+      var fd=new Date(today);fd.setDate(today.getDate()+i);
+      fechas.push(fd.toISOString().split('T')[0]);
     }
 
-    wx={temp:temp,olas:olas,viento:viento,dirViento:dirViento,presion:presion,coef:calcCoef(curDate)};
+    // Guardar en cache — renderForecast lo usará sin llamada extra
+    _fcCache={
+      lat:lat,lng:lng,ok:true,
+      data:{temps:temps,olas:olas,vientos:vientos,dirVientos:dirVientos,presiones:presiones,fechas:fechas}
+    };
+
+    // ── Actualizar panel de inicio con el día seleccionado ──
+    wx={
+      temp:temps[diffDays],olas:olas[diffDays],viento:vientos[diffDays],
+      dirViento:dirVientos[diffDays],presion:presiones[diffDays],
+      coef:calcCoef(curDate)
+    };
     wx.score=calcScore(wx);
     actualizarUI(wx);
+
+    // Si la tab de 7 días está visible, refrescarla con los nuevos datos
+    if(document.getElementById('tp-7dias').classList.contains('on')){
+      renderForecast();
+    }
   }catch(e){
+    console.warn('[WX]',e.message);
     wx={temp:16,olas:0.8,viento:14,dirViento:225,presion:1014,coef:calcCoef(curDate),score:72};
     actualizarUI(wx);
   }
@@ -766,50 +783,34 @@ function renderTideList(){
 }
 
 // ══ FORECAST ══
-var _fcCache={lat:null,lng:null,data:null};
-async function renderForecast(){
+var _fcCache={lat:null,lng:null,data:null,ok:false};
+function renderForecast(){
   var lista=document.getElementById('fc-list');
   var nota=document.getElementById('fc-nota');
   if(!lista)return;
-  lista.innerHTML='<div style="text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:12px;">⏳ Cargando pronóstico real...</div>';
+
+  // Si no hay cache todavía, esperar a que cargarWx lo llene
+  if(!_fcCache.data){
+    lista.innerHTML='<div style="text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:12px;">⏳ Cargando pronóstico...</div>';
+    // Pedir datos y volver a renderizar cuando lleguen
+    cargarWx(curLat,curLng);
+    return;
+  }
+
+  var cd=_fcCache.data;
+  var temps=cd.temps,olas=cd.olas,vientos=cd.vientos,presiones=cd.presiones,fechas=cd.fechas;
+  var ok=_fcCache.ok;
   var nomDias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   var nomMes=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-  var temps=[],olas=[],vientos=[],presiones=[],fechas=[],ok=false;
-  try{
-    if(_fcCache.lat===curLat&&_fcCache.lng===curLng&&_fcCache.data){
-      var cd=_fcCache.data;temps=cd.temps;olas=cd.olas;vientos=cd.vientos;presiones=cd.presiones;fechas=cd.fechas;ok=true;
-    }else{
-      var rm=await fetch('https://marine-api.open-meteo.com/v1/marine?latitude='+curLat+'&longitude='+curLng+'&daily=wave_height_max,sea_surface_temperature_max&timezone=America%2FSantiago&forecast_days=7');
-      var dm=await rm.json();
-      var ra=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+curLat+'&longitude='+curLng+'&daily=wind_speed_10m_max,surface_pressure_mean&timezone=America%2FSantiago&forecast_days=7');
-      var da=await ra.json();
-      var dd=dm.daily||{},da2=da.daily||{};
-      fechas=dd.time||da2.time||[];
-      for(var i=0;i<7;i++){
-        temps.push(dd.sea_surface_temperature_max?dd.sea_surface_temperature_max[i]:wx.temp);
-        olas.push(dd.wave_height_max?dd.wave_height_max[i]:wx.olas);
-        vientos.push(da2.wind_speed_10m_max?da2.wind_speed_10m_max[i]:wx.viento);
-        presiones.push(da2.surface_pressure_mean?da2.surface_pressure_mean[i]:wx.presion);
-      }
-      _fcCache={lat:curLat,lng:curLng,data:{temps:temps,olas:olas,vientos:vientos,presiones:presiones,fechas:fechas}};
-      ok=true;
-    }
-  }catch(e){
-    console.warn('[FORECAST] Sin conexión, usando estimación:',e.message);
-    for(var i=0;i<7;i++){
-      var fd0=new Date();fd0.setDate(fd0.getDate()+i);
-      temps.push(wx.temp);olas.push(wx.olas);vientos.push(wx.viento);presiones.push(wx.presion);
-      fechas.push(fd0.toISOString().split('T')[0]);
-    }
-  }
   var html='',best=0,bday=0;
+
   for(var i=0;i<7;i++){
-    var fd2=new Date();fd2.setDate(fd2.getDate()+i);
+    var fd2=new Date();fd2.setDate(fd2.getDate()+i);fd2.setHours(0,0,0,0);
     var fp=fechas[i]?fechas[i].split('-'):[fd2.getFullYear(),fd2.getMonth()+1,fd2.getDate()];
     var fdObj=new Date(parseInt(fp[0]),parseInt(fp[1])-1,parseInt(fp[2]));
     var t=temps[i]||wx.temp,o=olas[i]||wx.olas,v=vientos[i]||wx.viento,pr=presiones[i]||wx.presion;
-    var cd=calcCoef(fdObj);
-    var sc=calcScore({temp:t,olas:o,viento:v,presion:pr,coef:cd});
+    var coefDia=calcCoef(fdObj);
+    var sc=calcScore({temp:t,olas:o,viento:v,presion:pr,coef:coefDia});
     if(sc>best){best=sc;bday=i;}
     var esHoy=i===0;
     var nomDia=esHoy?'HOY':nomDias[fdObj.getDay()];
@@ -821,16 +822,19 @@ async function renderForecast(){
     else if(sc>=35){cl='#fbbf24';cn='Regular';emoji='🟡';}
     else{cl='#f87171';cn='Difícil';emoji='🔴';}
     var bg=sc>=65?'rgba(74,222,128,.07)':sc>=50?'rgba(245,166,35,.07)':'rgba(248,113,113,.07)';
-    // Semáforo seguridad marejada
-    var seguridad=o<1.0?'':o<1.5?'<span style="font-size:9px;color:#f5a623;margin-left:4px;">⚠️ olas</span>':'<span style="font-size:9px;color:#f87171;margin-left:4px;">🔴 marejada</span>';
+    var seguridad=o<1.0?'':o<1.5
+      ?'<span style="font-size:9px;color:#f5a623;margin-left:4px;">⚠️ olas</span>'
+      :'<span style="font-size:9px;color:#f87171;margin-left:4px;">🔴 marejada</span>';
     html+=''
-      +'<div style="border-radius:9px;margin-bottom:6px;padding:9px 10px;background:'+bg+';border:1px solid '+(i===bday?cl:'rgba(255,255,255,.05)')+'">'
+      +'<div style="border-radius:9px;margin-bottom:6px;padding:9px 10px;background:'+bg
+      +';border:1px solid '+(i===bday?cl:'rgba(255,255,255,.05)')+'">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">'
       +'<div>'
-      +'<span style="font-size:'+(esHoy?'13px':'11px')+';font-weight:800;color:'+(esHoy?'#fff':'rgba(255,255,255,.7)')+';">'+emoji+' '+nomDia+'</span>'
+      +'<span style="font-size:'+(esHoy?'13px':'11px')+';font-weight:800;color:'+(esHoy?'#fff':'rgba(255,255,255,.7)')
+      +';">'+emoji+' '+nomDia+'</span>'
       +'<span style="font-size:9px;color:rgba(255,255,255,.3);margin-left:5px;">'+fechaLbl+'</span>'
       +seguridad
-      +(ok?'':'<span style="font-size:8px;color:rgba(255,166,0,.5);margin-left:4px;">est.</span>')
+      +(ok?'':'<span style="font-size:8px;color:rgba(245,166,0,.5);margin-left:4px;">est.</span>')
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:6px;">'
       +'<span style="font-size:10px;color:'+cl+';">'+cn+'</span>'
@@ -841,10 +845,14 @@ async function renderForecast(){
       +'<div style="height:100%;width:'+sc+'%;background:'+cl+';border-radius:3px;"></div>'
       +'</div>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;">'
-      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">OLAS</div><div style="font-size:11px;font-weight:700;color:'+(o<=1.0?'#4ade80':o<=1.8?'#f5a623':'#f87171')+';">'+o.toFixed(1)+'m</div></div>'
-      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">VIENTO</div><div style="font-size:11px;font-weight:700;color:'+(v<15?'#4ade80':v<25?'#f5a623':'#f87171')+';">'+Math.round(v)+'km</div></div>'
-      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">T°AGUA</div><div style="font-size:11px;font-weight:700;color:#38bdf8;">'+t.toFixed(1)+'°</div></div>'
-      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">LUNA</div><div style="font-size:11px;font-weight:700;color:'+(cd>=70?'#4ade80':cd>=45?'#f5a623':'rgba(255,255,255,.4)')+';">'+cd+'</div></div>'
+      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">OLAS</div>'
+      +'<div style="font-size:11px;font-weight:700;color:'+(o<=1.0?'#4ade80':o<=1.8?'#f5a623':'#f87171')+';">'+o.toFixed(1)+'m</div></div>'
+      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">VIENTO</div>'
+      +'<div style="font-size:11px;font-weight:700;color:'+(v<15?'#4ade80':v<25?'#f5a623':'#f87171')+';">'+Math.round(v)+'km</div></div>'
+      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">T°AGUA</div>'
+      +'<div style="font-size:11px;font-weight:700;color:#38bdf8;">'+t.toFixed(1)+'°</div></div>'
+      +'<div style="text-align:center;"><div style="font-size:8px;color:rgba(255,255,255,.3);">LUNA</div>'
+      +'<div style="font-size:11px;font-weight:700;color:'+(coefDia>=70?'#4ade80':coefDia>=45?'#f5a623':'rgba(255,255,255,.4)')+';">'+coefDia+'</div></div>'
       +'</div>'
       +'</div>';
   }
@@ -853,12 +861,34 @@ async function renderForecast(){
   var mejorNom=bday===0?'<strong>Hoy</strong>':nomDias[mejorObj.getDay()]+' '+mejorObj.getDate()+' '+nomMes[mejorObj.getMonth()];
   nota.innerHTML='<div style="margin-bottom:4px;">⭐ Mejor día: '+mejorNom+' — índice <strong style="color:#4ade80;">'+best+'/100</strong></div>'
     +(ok?'<div style="font-size:9px;color:rgba(255,255,255,.3);">✅ Datos reales Open-Meteo · Coef. lunar astronómico</div>'
-       :'<div style="font-size:9px;color:rgba(245,166,0,.5);">⚠️ Sin conexión — estimación basada en condiciones actuales</div>');
+        :'<div style="font-size:9px;color:rgba(245,166,0,.5);">⚠️ Sin conexión — estimación basada en condiciones actuales</div>');
 }
 
 // ══ FECHA ══
-function setDay(d,btn){document.querySelectorAll('.dc').forEach(function(b){b.classList.remove('on');});btn.classList.add('on');curDate=new Date();curDate.setDate(curDate.getDate()+d);document.getElementById('calin').valueAsDate=curDate;cargarWx(curLat,curLng);}
-function handleCal(val){document.querySelectorAll('.dc').forEach(function(b){b.classList.remove('on');});var p=val.split('-');curDate=new Date(p[0],p[1]-1,p[2]);cargarWx(curLat,curLng);}
+function setDay(d,btn){
+  document.querySelectorAll('.dc').forEach(function(b){b.classList.remove('on');});
+  btn.classList.add('on');
+  curDate=new Date();curDate.setHours(0,0,0,0);
+  curDate.setDate(curDate.getDate()+d);
+  document.getElementById('calin').valueAsDate=curDate;
+  // Feedback visual — limpiar valores mientras carga
+  var dias=['Hoy','Mañana','+2 días','+3 días','+4 días','+5 días','+6 días','+7 días'];
+  sv('d-v','...','');sv('d-t','...','');sv('d-o','...','');sv('d-p','...','');
+  // Limpiar cache de forecast para forzar recarga con nueva ubicación/día
+  _fcCache={lat:null,lng:null,data:null};
+  cargarWx(curLat,curLng);
+  actualizarSolunares(curLat,curLng);
+}
+function handleCal(val){
+  document.querySelectorAll('.dc').forEach(function(b){b.classList.remove('on');});
+  var p=val.split('-');
+  curDate=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));
+  curDate.setHours(0,0,0,0);
+  sv('d-v','...','');sv('d-t','...','');sv('d-o','...','');sv('d-p','...','');
+  _fcCache={lat:null,lng:null,data:null};
+  cargarWx(curLat,curLng);
+  actualizarSolunares(curLat,curLng);
+}
 
 // ══ PANEL ══
 function togglePanel(){document.getElementById('panel').classList.toggle('on');}
