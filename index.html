@@ -1561,18 +1561,67 @@ function renderTideList(){
 
 // ══ FORECAST ══
 function renderForecast(){
-  var dias=['Hoy','Mañana','Mié','Jue','Vie','Sáb','Dom'],best=0,bday=0,html='';
+  var hoy=new Date();
+  var nomDias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  var nomMes=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  var best=0,bday=0,html='';
+  var scores=[];
+
   for(var i=0;i<7;i++){
+    var fecha=new Date(hoy);
+    fecha.setDate(hoy.getDate()+i);
     var cd=Math.round(Math.max(20,Math.min(100,wx.coef+8*Math.sin((i/3.5)*Math.PI))));
-    var v=Math.max(5,wx.viento+(Math.random()*8-4)),o=Math.max(0.2,wx.olas+(Math.random()*0.4-0.2));
+    var v=Math.max(5,wx.viento+(Math.sin(i*1.3)*4));
+    var o=Math.max(0.2,wx.olas+(Math.sin(i*0.9)*0.2));
     var sc=calcScore({temp:wx.temp,olas:o,viento:v,presion:wx.presion,coef:cd});
+    scores.push({sc:sc,fecha:fecha,v:v,o:o,cd:cd});
     if(sc>best){best=sc;bday=i;}
-    var cl=sc>=75?'#4ade80':sc>=50?'#f5a623':'#f87171';
-    var cn=sc>=75?'Excelente':sc>=65?'Muy bueno':sc>=50?'Bueno':sc>=35?'Regular':'Difícil';
-    html+='<div class="fc-row"><div class="fc-day">'+dias[i]+'</div><div class="fc-bar"><div class="fc-fill" style="width:'+sc+'%;background:'+cl+';"></div></div><div style="font-size:10px;text-align:right;color:'+cl+';">'+cn+'</div><div style="font-size:11px;font-weight:800;text-align:right;color:'+cl+';">'+sc+'</div></div>';
   }
+
+  for(var i=0;i<7;i++){
+    var s=scores[i];
+    var sc=s.sc;
+    var fecha=s.fecha;
+    var esHoy=i===0;
+    var esMejor=i===bday;
+
+    // Heatmap: colores por puntuación
+    var bg,cl,cn,emoji;
+    if(sc>=80){bg='rgba(74,222,128,.15)';cl='#4ade80';cn='Excelente';emoji='🟢';}
+    else if(sc>=65){bg='rgba(74,222,128,.08)';cl='#86efac';cn='Muy bueno';emoji='🟢';}
+    else if(sc>=50){bg='rgba(245,166,35,.10)';cl='#f5a623';cn='Bueno';emoji='🟡';}
+    else if(sc>=35){bg='rgba(245,166,35,.06)';cl='#fbbf24';cn='Regular';emoji='🟡';}
+    else{bg='rgba(248,113,113,.10)';cl='#f87171';cn='Difícil';emoji='🔴';}
+
+    var nomDia=esHoy?'HOY':nomDias[fecha.getDay()];
+    var fechaTxt=fecha.getDate()+' '+nomMes[fecha.getMonth()];
+    var borde=esMejor?'border:1px solid '+cl+';':'border:1px solid rgba(255,255,255,.05);';
+
+    html+=''
+      +'<div style="display:grid;grid-template-columns:64px 1fr 80px 36px;gap:5px;align-items:center;'
+      +'padding:9px 8px;border-radius:8px;margin-bottom:5px;background:'+bg+';'+borde
+      +(esHoy?'box-shadow:0 0 0 1px rgba(255,255,255,.1);':'')
+      +'">'
+      // Día
+      +'<div>'
+      +'<div style="font-size:'+(esHoy?'12px':'11px')+';font-weight:'+(esHoy?'800':'700')+';color:'+(esHoy?'#fff':'rgba(255,255,255,.7)')+';">'+emoji+' '+nomDia+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.35);">'+fechaTxt+'</div>'
+      +'</div>'
+      // Barra heatmap
+      +'<div style="position:relative;height:8px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden;">'
+      +'<div style="position:absolute;left:0;top:0;height:100%;width:'+sc+'%;background:'+cl+';border-radius:4px;transition:width .5s;"></div>'
+      +'</div>'
+      // Etiqueta
+      +'<div style="font-size:10px;text-align:right;color:'+cl+';">'+cn+'</div>'
+      // Score
+      +'<div style="font-size:12px;font-weight:800;text-align:right;color:'+cl+';">'+sc+'</div>'
+      +'</div>';
+  }
+
   document.getElementById('fc-list').innerHTML=html;
-  document.getElementById('fc-nota').innerHTML=bday===0?'⭐ <strong>Hoy</strong> es el mejor día de la semana.':'⭐ Mejor día: <strong>'+dias[bday]+'</strong> con índice '+best+'/100.';
+  var mejorFecha=scores[bday].fecha;
+  var mejorNom=bday===0?'<strong>Hoy</strong>':nomDias[mejorFecha.getDay()]+' '+mejorFecha.getDate()+' '+nomMes[mejorFecha.getMonth()];
+  document.getElementById('fc-nota').innerHTML='⭐ Mejor día: '+mejorNom+' — índice <strong style="color:#4ade80;">'+best+'/100</strong>';
 }
 
 // ══ FECHA ══
