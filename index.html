@@ -267,6 +267,35 @@ html,body{height:100%;overflow:hidden;background:#000;}
 
 #tide-type-badge{font-size:9px;padding:2px 7px;border-radius:3px;font-weight:700;display:inline-block;margin-left:4px;}
 .wcorr{font-size:8px;color:rgba(255,255,255,.25);margin-top:1px;}
+
+/* ─── POPUP FLOTANTE MAPA ───────────────────────────────────── */
+#popup-datos{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+  z-index:400;width:330px;max-width:92vw;
+  background:rgba(4,16,26,.96);border:1px solid rgba(56,189,248,.35);
+  border-radius:14px;padding:0;overflow:hidden;
+  box-shadow:0 8px 32px rgba(0,0,0,.7);backdrop-filter:blur(14px);
+  display:none;transition:opacity .25s;
+}
+#popup-datos.on{display:block;}
+.pd-hdr{padding:9px 14px;display:flex;justify-content:space-between;align-items:center;
+  border-bottom:1px solid rgba(255,255,255,.07);background:rgba(56,189,248,.07);}
+.pd-loc{font-size:11px;font-weight:700;color:#38bdf8;}
+.pd-close{background:none;border:none;color:rgba(255,255,255,.35);font-size:18px;cursor:pointer;line-height:1;}
+.pd-body{padding:11px 14px;}
+.pd-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.05);}
+.pd-row:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
+.pd-ico{font-size:18px;flex-shrink:0;margin-top:1px;}
+.pd-info{flex:1;min-width:0;}
+.pd-label{font-size:9px;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;}
+.pd-val{font-size:14px;font-weight:800;color:#fff;margin-bottom:2px;}
+.pd-sub{font-size:10px;color:rgba(255,255,255,.45);line-height:1.4;}
+.pd-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;}
+.pd-veda{background:rgba(248,113,113,.15);color:#f87171;border:1px solid rgba(248,113,113,.3);}
+.pd-ok{background:rgba(74,222,128,.12);color:#4ade80;border:1px solid rgba(74,222,128,.25);}
+.pd-warn{background:rgba(245,166,35,.12);color:#f5a623;border:1px solid rgba(245,166,35,.25);}
+.pd-tecnica{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.2);border-radius:7px;padding:7px 10px;margin-top:7px;font-size:10px;color:rgba(255,255,255,.7);line-height:1.5;}
+.pd-tecnica strong{color:var(--gold);}
 </style>
 </head>
 <body>
@@ -662,6 +691,40 @@ html,body{height:100%;overflow:hidden;background:#000;}
     <button class="mbtn" onclick="tryUnlock()">Desbloquear</button>
     <div class="mhint">Sin libro: <strong style="color:var(--gold)">Mercado Libre · Hotmart</strong></div>
     <button class="mcl" onclick="document.getElementById('umo').classList.remove('on')">Cancelar</button>
+  </div>
+</div>
+
+<!-- POPUP FLOTANTE MAPA -->
+<div id="popup-datos">
+  <div class="pd-hdr">
+    <span class="pd-loc" id="pd-loc">📍 Analizando...</span>
+    <button class="pd-close" onclick="cerrarPopup()">✕</button>
+  </div>
+  <div class="pd-body">
+    <div class="pd-row">
+      <div class="pd-ico">📐</div>
+      <div class="pd-info">
+        <div class="pd-label">Profundidad estimada</div>
+        <div class="pd-val" id="pd-prof">--</div>
+        <div class="pd-sub" id="pd-fondo">Calculando...</div>
+      </div>
+    </div>
+    <div class="pd-row">
+      <div class="pd-ico">🐟</div>
+      <div class="pd-info">
+        <div class="pd-label">Especies activas ahora</div>
+        <div id="pd-especies" style="margin-bottom:4px;">--</div>
+        <div id="pd-vedas"></div>
+      </div>
+    </div>
+    <div class="pd-row">
+      <div class="pd-ico">🎣</div>
+      <div class="pd-info">
+        <div class="pd-label">Técnica recomendada</div>
+        <div class="pd-sub" id="pd-tecnica-txt">--</div>
+      </div>
+    </div>
+    <div id="pd-tecnica-box" class="pd-tecnica" style="display:none;"></div>
   </div>
 </div>
 
@@ -1286,6 +1349,7 @@ function initMap(){
     // Auto-seleccionar caleta más cercana en el formulario de precios
     autoSeleccionarCaleta(curLat,curLng);
     _wxCache7=null;cargarWx(curLat,curLng);cargarProfundidad(curLat,curLng);calcularMarea();actualizarSolunares(curLat,curLng);
+    mostrarPopupDatos(curLat,curLng);
   });
   cargarCaletas();
 }
@@ -1448,6 +1512,144 @@ async function sendChat(){var inp=document.getElementById('chat-in'),msg=inp.val
 /* ══════════════════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════════
+   POPUP FLOTANTE — PROFUNDIDAD + ESPECIES + VEDAS + TÉCNICA
+   ══════════════════════════════════════════════════════════════ */
+var _ESPECIES_POPUP = [
+  {n:'Corvina',temp:[13,20],veda:[10,11],carnada:'Pota · Navajuela · Macha',peso:'60–100g'},
+  {n:'Jurel',temp:[14,22],veda:[],carnada:'Anchoveta · Sardina · Pota',peso:'80–120g'},
+  {n:'Lenguado',temp:[10,18],veda:[],talla:40,carnada:'Pota · Anchoveta',peso:'80–120g'},
+  {n:'Róbalo',temp:[11,19],veda:[],carnada:'Pota · Anchoveta · Navajuela',peso:'60–100g'},
+  {n:'Sierra',temp:[15,23],veda:[],carnada:'Anchoveta · Sardina',peso:'80–120g'},
+  {n:'Merluza',temp:[9,16],veda:[9],carnada:'Pota · Jibia',peso:'100–150g'},
+  {n:'Congrio dorado',temp:[8,17],veda:[],carnada:'Pota · Jibia',peso:'150g+'},
+  {n:'Reineta',temp:[12,19],veda:[],carnada:'Anchoveta · Pota',peso:'100–150g'},
+  {n:'Caballa',temp:[15,23],veda:[],carnada:'Anchoveta · Sardina',peso:'60–80g'},
+  {n:'Pejegallo',temp:[10,17],veda:[-1],carnada:'Pota',peso:'100g',protegido:true},
+  {n:'Loco',temp:[10,18],veda:[-1],carnada:null,peso:null,protegido:true},
+];
+
+function _distCostaPopup(lat,lng){
+  var pts=[[-18.47,-70.32],[-20.21,-70.15],[-23.65,-70.42],[-27.07,-70.82],[-29.95,-71.34],[-30.26,-71.50],[-31.91,-71.51],[-32.77,-71.53],[-33.02,-71.59],[-33.05,-71.66],[-33.30,-71.66],[-33.59,-71.62],[-33.80,-71.74],[-34.39,-72.00],[-35.33,-72.42],[-36.70,-73.11],[-37.61,-73.66],[-39.88,-73.43],[-41.47,-72.94],[-42.48,-73.76],[-53.16,-70.92]];
+  var mejor=9999,cx=Math.cos(lat*Math.PI/180);
+  for(var i=0;i<pts.length-1;i++){
+    var ax=(pts[i][1]-lng)*111320*cx,ay=(pts[i][0]-lat)*110540,bx=(pts[i+1][1]-lng)*111320*cx,by=(pts[i+1][0]-lat)*110540;
+    var dx=bx-ax,dy=by-ay,L2=dx*dx+dy*dy,t=L2===0?0:Math.max(0,Math.min(1,((-ax*dx)+(-ay*dy))/L2));
+    var d=Math.sqrt(Math.pow(ax+t*dx,2)+Math.pow(ay+t*dy,2))/1000;
+    if(d<mejor)mejor=d;
+  }
+  return mejor;
+}
+
+function _profModeloPopup(distM,lat){
+  if(lat>-30){if(distM<300)return{p:distM*0.15,zona:'rompiente',fondo:'arena/roca'};if(distM<3000)return{p:45+(distM-300)*0.07,zona:'plataforma',fondo:'arena'};return{p:201+(distM-3000)*0.04,zona:'offshore',fondo:'fango'};}
+  if(lat>-37){if(distM<100)return{p:distM*0.028,zona:'intermareal',fondo:'arena/roca'};if(distM<500)return{p:2.8+(distM-100)*0.055,zona:'rompiente/poza',fondo:'arena'};if(distM<2000)return{p:24.8+(distM-500)*0.060,zona:'veril',fondo:'arena/roca'};if(distM<8000)return{p:110+(distM-2000)*0.022,zona:'plataforma',fondo:'fango'};return{p:242+(distM-8000)*0.012,zona:'offshore',fondo:'fango'};}
+  if(lat>-43){if(distM<200)return{p:distM*0.04,zona:'orilla sur',fondo:'roca/grava'};if(distM<1500)return{p:8+(distM-200)*0.09,zona:'canal sur',fondo:'roca'};return{p:125+(distM-1500)*0.03,zona:'plataforma sur',fondo:'fango'};}
+  if(distM<500)return{p:distM*0.35,zona:'fjord',fondo:'roca'};
+  return{p:175+(distM-500)*0.05,zona:'offshore patagónico',fondo:'fango'};
+}
+
+function mostrarPopupDatos(lat,lng){
+  var popup=document.getElementById('popup-datos');
+  if(!popup)return;
+  popup.classList.add('on');
+  var distKm=_distCostaPopup(lat,lng),distM=distKm*1000;
+  var perfil=_profModeloPopup(distM,lat),prof=perfil.p;
+  var mesActual=new Date().getMonth()+1;
+  var locEl=document.getElementById('pd-loc');
+  if(locEl)locEl.textContent='📍 '+lat.toFixed(4)+', '+lng.toFixed(4);
+
+  if(distKm>50){
+    var pe=document.getElementById('pd-prof');if(pe){pe.textContent='Tierra';pe.style.color='#f87171';}
+    var fe=document.getElementById('pd-fondo');if(fe)fe.textContent='Selecciona un punto en el mar o cerca de la costa.';
+    var ee=document.getElementById('pd-especies');if(ee)ee.innerHTML='--';
+    var ve=document.getElementById('pd-vedas');if(ve)ve.innerHTML='';
+    var te=document.getElementById('pd-tecnica-txt');if(te)te.textContent='Mueve el punto hacia la costa.';
+    var tb=document.getElementById('pd-tecnica-box');if(tb)tb.style.display='none';
+    return;
+  }
+
+  var pCol,zonaTxt,tecnicaTxt,carnada,pesoPlomo;
+  if(prof<0.5){pCol='#fbbf24';zonaTxt='Intermareal · '+perfil.fondo;tecnicaTxt='Zona seca o intermareal.';carnada='--';pesoPlomo='No lanzar';}
+  else if(prof<2.5){pCol='#4ade80';zonaTxt='Rompiente · '+perfil.fondo;tecnicaTxt='Lanza al borde de la espuma. Madrugada y atardecer.';carnada='Navajuela · Macha · Pota';pesoPlomo='30–60g piramidal';}
+  else if(prof<5){pCol='#4ade80';zonaTxt='Poza · '+perfil.fondo;tecnicaTxt='Busca la entrada de la poza. Aparejo 2 anzuelos #2/0.';carnada='Navajuela · Macha · Pota · Anchoveta';pesoPlomo='60–80g piramidal';}
+  else if(prof<9){pCol='#4ade80';zonaTxt='Veril interior · '+perfil.fondo;tecnicaTxt='Palangre de fondo 3–4 anzuelos. Carnada estática.';carnada='Pota · Anchoveta · Jibia';pesoPlomo='80–100g torpedo';}
+  else if(prof<16){pCol='#f5a623';zonaTxt='Canaleta · '+perfil.fondo;tecnicaTxt='Aparejo canaleta. Lanza a 45° y deja correr la corriente.';carnada='Pota · Anchoveta · Macha';pesoPlomo='100–120g torpedo/plano';}
+  else if(prof<35){pCol='#f5a623';zonaTxt='Canal profundo';tecnicaTxt='Pesca de fondo profundo. Mejor desde embarcación.';carnada='Pota · Jibia';pesoPlomo='150g+ torpedo';}
+  else{pCol='#818cf8';zonaTxt='Plataforma continental';tecnicaTxt='Requiere embarcación. Mar abierto.';carnada='Pota · Jibia';pesoPlomo='200g+';}
+
+  var pe=document.getElementById('pd-prof');
+  if(pe){pe.textContent=prof.toFixed(1)+' m';pe.style.color=pCol;}
+  var fe=document.getElementById('pd-fondo');
+  if(fe)fe.textContent=zonaTxt+' · '+(distKm<0.5?'<500m de costa':distKm.toFixed(1)+'km de costa');
+
+  // Especies activas con vedas
+  var aptas=[],enVeda=[],protegidas=[];
+  var temp=wx.temp||15;
+  _ESPECIES_POPUP.forEach(function(e){
+    if(temp>=e.temp[0]&&temp<=e.temp[1]){
+      if(e.protegido){protegidas.push(e.n);return;}
+      if(e.veda&&e.veda.indexOf(mesActual)>=0)enVeda.push(e.n);
+      else aptas.push(e.n);
+    }
+  });
+
+  var ee=document.getElementById('pd-especies');
+  if(ee){
+    if(aptas.length>0)ee.innerHTML=aptas.map(function(n){return'<span class="pd-badge pd-ok">🐟 '+n+'</span>';}).join('');
+    else ee.innerHTML='<span style="font-size:11px;color:rgba(255,255,255,.4);">Ninguna activa en T°'+temp.toFixed(1)+'°C</span>';
+  }
+
+  var ve=document.getElementById('pd-vedas');
+  if(ve){
+    var html='';
+    if(enVeda.length>0)html+=enVeda.map(function(n){return'<span class="pd-badge pd-veda">🚫 '+n+' (veda)</span>';}).join('');
+    if(protegidas.length>0)html+=protegidas.map(function(n){return'<span class="pd-badge pd-veda">⛔ '+n+' (protegido)</span>';}).join('');
+    ve.innerHTML=html;
+  }
+
+  var te=document.getElementById('pd-tecnica-txt');
+  if(te)te.textContent=tecnicaTxt;
+
+  var tb=document.getElementById('pd-tecnica-box');
+  if(tb&&pesoPlomo!=='No lanzar'){
+    tb.style.display='block';
+    tb.innerHTML='<strong>🎯 Plomo:</strong> '+pesoPlomo
+      +' &nbsp;|&nbsp; <strong>🪱 Carnada:</strong> '+carnada
+      +'<br><strong>⚓ Marea:</strong> '+(wx.coef>=70?'Vivas — 2h antes de pleamar son oro':wx.coef>=45?'Intermedias — busca la poza':'Muertas — carnada olor fuerte')
+      +'<br><strong>🌡️ T°:</strong> '+temp.toFixed(1)+'°C · <strong>🌊 Olas:</strong> '+(wx.olas||0.8).toFixed(1)+'m';
+  }else if(tb){tb.style.display='none';}
+
+  // Refinar con ETOPO en segundo plano
+  _refinarProfEtopo(lat,lng,distKm);
+}
+
+async function _refinarProfEtopo(lat,lng,distKm){
+  if(distKm>20)return;
+  try{
+    var lo360=lng<0?lng+360:lng;
+    var url='https://coastwatch.pfeg.noaa.gov/erddap/griddap/ETOPO_2022_v1_15s.json?z[('+lat.toFixed(4)+'):1:('+lat.toFixed(4)+')][('+lo360.toFixed(4)+'):1:('+lo360.toFixed(4)+')]';
+    var ctrl=new AbortController();setTimeout(function(){ctrl.abort();},5000);
+    var r=await fetch(url,{signal:ctrl.signal});
+    var d=await r.json();
+    if(d.table&&d.table.rows&&d.table.rows[0]){
+      var z=d.table.rows[0][2];
+      if(z!==null&&z<-1){
+        var pe=document.getElementById('pd-prof');
+        var fe=document.getElementById('pd-fondo');
+        if(pe){pe.textContent=Math.abs(z).toFixed(1)+' m ✓';pe.style.color='#4ade80';}
+        if(fe){var txt=fe.textContent.split('·')[0].trim();fe.textContent=txt+' · ETOPO2022 verificado';}
+      }
+    }
+  }catch(e){}
+}
+
+function cerrarPopup(){
+  var p=document.getElementById('popup-datos');
+  if(p)p.classList.remove('on');
+}
+
 window.addEventListener('load',function(){
   initMap();
   document.getElementById('calin').valueAsDate=new Date();
